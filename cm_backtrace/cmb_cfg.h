@@ -29,16 +29,43 @@
 #ifndef _CMB_CFG_H_
 #define _CMB_CFG_H_
 
-/* print line, must config by user */
-#define cmb_printf  printf	    /* e.g., printf(__VA_ARGS__);printf("\r\n")  or  SEGGER_RTT_printf(0, __VA_ARGS__);SEGGER_RTT_WriteString(0, "\r\n")  */
+/*
+  printf, must config by user.
+  printf  : stdio.h
+  xprintf : http://elm-chan.org/fsw/strf/xprintf.html,
+  we rewrite 'fputc' to retarget the C library printf function to the USART
+  int fputc(int ch, FILE *f){
+    if('\n' == ch)
+      USART_SendByte('\r');
+    USART_SendByte(ch);
+    return ch;
+  }
+  on Windows, printf function should convert '\n' to '\r\n' automatically.
+*/
+#define cmb_printf        printf
+
 /* enable bare metal(no OS) platform */
 #define CMB_USING_BARE_METAL_PLATFORM
+
 /* enable OS platform */
 /* #define CMB_USING_OS_PLATFORM */
-/* OS platform type, must config when CMB_USING_OS_PLATFORM is enable */
-/* #define CMB_OS_PLATFORM_TYPE           CMB_OS_PLATFORM_RTT or CMB_OS_PLATFORM_UCOSII or CMB_OS_PLATFORM_UCOSIII or CMB_OS_PLATFORM_FREERTOS or CMB_OS_PLATFORM_RTX5 */
-/* cpu platform type, must config by user */
-#define CMB_CPU_PLATFORM_TYPE    CMB_CPU_ARM_CORTEX_M4      /* CMB_CPU_ARM_CORTEX_M0 or CMB_CPU_ARM_CORTEX_M3 or CMB_CPU_ARM_CORTEX_M4 or CMB_CPU_ARM_CORTEX_M7 */
+/* OS platform type, must config when CMB_USING_OS_PLATFORM is enable 
+  CMB_OS_PLATFORM_RTT
+  CMB_OS_PLATFORM_UCOSII 
+  CMB_OS_PLATFORM_UCOSIII 
+  CMB_OS_PLATFORM_FREERTOS 
+  CMB_OS_PLATFORM_RTX5
+ */
+/* #define CMB_OS_PLATFORM_TYPE  CMB_OS_PLATFORM_RTT */
+
+/* cpu platform type, must config by user 
+  CMB_CPU_ARM_CORTEX_M0
+  CMB_CPU_ARM_CORTEX_M3
+  CMB_CPU_ARM_CORTEX_M4
+  CMB_CPU_ARM_CORTEX_M7
+ */
+#define CMB_CPU_PLATFORM_TYPE    CMB_CPU_ARM_CORTEX_M4
+
 /* enable dump stack information */
 #define CMB_USING_DUMP_STACK_INFO
 
