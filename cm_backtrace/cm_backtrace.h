@@ -29,7 +29,390 @@
 #ifndef _CORTEXM_BACKTRACE_H_
 #define _CORTEXM_BACKTRACE_H_
 
-#include "cmb_def.h"
+#include <cmb_cfg.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+/* library software version number */
+#define CMB_SW_VERSION                "1.4.1"
+
+#define CMB_CPU_ARM_CORTEX_M0             0
+#define CMB_CPU_ARM_CORTEX_M3             1
+#define CMB_CPU_ARM_CORTEX_M4             2
+#define CMB_CPU_ARM_CORTEX_M7             3
+#define CMB_CPU_ARM_CORTEX_M33            4
+
+#define CMB_OS_PLATFORM_RTT               0
+#define CMB_OS_PLATFORM_UCOSII            1
+#define CMB_OS_PLATFORM_UCOSIII           2
+#define CMB_OS_PLATFORM_FREERTOS          3
+#define CMB_OS_PLATFORM_RTX5              4
+
+#define CMB_PRINT_LANGUAGE_ENGLISH        0
+#define CMB_PRINT_LANGUAGE_CHINESE        1
+#define CMB_PRINT_LANGUAGE_CHINESE_UTF8   2
+
+/* name max length, default size: 32 */
+#ifndef CMB_NAME_MAX
+#define CMB_NAME_MAX                      32
+#endif
+
+/* print information language, default is English */
+#ifndef CMB_PRINT_LANGUAGE
+#define CMB_PRINT_LANGUAGE                CMB_PRINT_LANGUAGE_ENGLISH
+#endif
+
+
+#if defined(__ARMCC_VERSION)
+    /* C stack block name, default is STACK */
+    #ifndef CMB_CSTACK_BLOCK_NAME
+    #define CMB_CSTACK_BLOCK_NAME          STACK
+    #endif
+    /* code section name, default is ER_IROM1 */
+    #ifndef CMB_CODE_SECTION_NAME
+    #define CMB_CODE_SECTION_NAME          ER_IROM1
+    #endif
+#elif defined(__ICCARM__)
+    /* C stack block name, default is 'CSTACK' */
+    #ifndef CMB_CSTACK_BLOCK_NAME
+    #define CMB_CSTACK_BLOCK_NAME          "CSTACK"
+    #endif
+    /* code section name, default is '.text' */
+    #ifndef CMB_CODE_SECTION_NAME
+    #define CMB_CODE_SECTION_NAME          ".text"
+    #endif
+#elif defined(__GNUC__)
+    /* C stack block start address, defined on linker script file, default is _sstack */
+    #ifndef CMB_CSTACK_BLOCK_START
+    #define CMB_CSTACK_BLOCK_START         _sstack
+    #endif
+    /* C stack block end address, defined on linker script file, default is _estack */
+    #ifndef CMB_CSTACK_BLOCK_END
+    #define CMB_CSTACK_BLOCK_END           _estack
+    #endif
+    /* code section start address, defined on linker script file, default is _stext */
+    #ifndef CMB_CODE_SECTION_START
+    #define CMB_CODE_SECTION_START         _stext
+    #endif
+    /* code section end address, defined on linker script file, default is _etext */
+    #ifndef CMB_CODE_SECTION_END
+    #define CMB_CODE_SECTION_END           _etext
+    #endif
+#else
+    #error "not supported compiler"
+#endif
+
+/* supported function call stack max depth, default is 16 */
+#ifndef CMB_CALL_STACK_MAX_DEPTH
+#define CMB_CALL_STACK_MAX_DEPTH       16
+#endif
+
+/* system handler control and state register */
+#ifndef CMB_SYSHND_CTRL
+#define CMB_SYSHND_CTRL                (*(volatile uint32_t*)  (0xE000ED24u))
+#endif
+
+/* memory management fault status register */
+#ifndef CMB_NVIC_MFSR
+#define CMB_NVIC_MFSR                  (*(volatile uint8_t*) (0xE000ED28u))
+#endif
+
+/* bus fault status register */
+#ifndef CMB_NVIC_BFSR
+#define CMB_NVIC_BFSR                  (*(volatile uint8_t*) (0xE000ED29u))
+#endif
+
+/* usage fault status register */
+#ifndef CMB_NVIC_UFSR
+#define CMB_NVIC_UFSR                  (*(volatile uint16_t*)(0xE000ED2Au))
+#endif
+
+/* hard fault status register */
+#ifndef CMB_NVIC_HFSR
+#define CMB_NVIC_HFSR                  (*(volatile uint32_t*)  (0xE000ED2Cu))
+#endif
+
+/* debug fault status register */
+#ifndef CMB_NVIC_DFSR
+#define CMB_NVIC_DFSR                  (*(volatile uint16_t*)(0xE000ED30u))
+#endif
+
+/* memory management fault address register */
+#ifndef CMB_NVIC_MMAR
+#define CMB_NVIC_MMAR                  (*(volatile uint32_t*)  (0xE000ED34u))
+#endif
+
+/* bus fault manage address register */
+#ifndef CMB_NVIC_BFAR
+#define CMB_NVIC_BFAR                  (*(volatile uint32_t*)  (0xE000ED38u))
+#endif
+
+/* auxiliary fault status register */
+#ifndef CMB_NVIC_AFSR
+#define CMB_NVIC_AFSR                  (*(volatile uint16_t*)(0xE000ED3Cu))
+#endif
+
+/**
+ * Cortex-M fault registers
+ */
+struct cmb_hard_fault_regs{
+  struct {
+    uint32_t r0;                     // Register R0
+    uint32_t r1;                     // Register R1
+    uint32_t r2;                     // Register R2
+    uint32_t r3;                     // Register R3
+    uint32_t r12;                    // Register R12
+    uint32_t lr;                     // Link register
+    uint32_t pc;                     // Program counter
+    union {
+      uint32_t value;
+      struct {
+#if (CMB_CPU_PLATFORM_TYPE == CMB_CPU_ARM_CORTEX_M33)
+        uint32_t IPSR : 9;           // Interrupt Program Status register (IPSR)
+        uint32_t EPSR : 18;          // Execution Program Status register (EPSR)
+        uint32_t APSR : 5;           // Application Program Status register (APSR)
+#else
+        uint32_t IPSR : 8;           // Interrupt Program Status register (IPSR)
+        uint32_t EPSR : 19;          // Execution Program Status register (EPSR)
+        uint32_t APSR : 5;           // Application Program Status register (APSR)
+#endif
+      } bits;
+    } psr;                               // Program status register.
+  } saved;
+
+  union {
+    uint32_t value;
+    struct {
+      uint32_t MEMFAULTACT    : 1;   // Read as 1 if memory management fault is active
+      uint32_t BUSFAULTACT    : 1;   // Read as 1 if bus fault exception is active
+#if (CMB_CPU_PLATFORM_TYPE == CMB_CPU_ARM_CORTEX_M33)
+      uint32_t HARDFAULTACT   : 1;   // Read as 1 if hardfault is active
+#else
+      uint32_t UnusedBits1    : 1;
+#endif
+      uint32_t USGFAULTACT    : 1;   // Read as 1 if usage fault exception is active
+#if (CMB_CPU_PLATFORM_TYPE == CMB_CPU_ARM_CORTEX_M33)
+      uint32_t SECUREFAULTACT : 1;   // Read as 1 if secure fault exception is active
+      uint32_t NMIACT         : 1;   // Read as 1 if NMI exception is active
+      uint32_t UnusedBits2    : 1;
+#else
+      uint32_t UnusedBits2    : 3;
+#endif
+      uint32_t SVCALLACT      : 1;   // Read as 1 if SVC exception is active
+      uint32_t MONITORACT     : 1;   // Read as 1 if debug monitor exception is active
+      uint32_t UnusedBits3    : 1;
+      uint32_t PENDSVACT      : 1;   // Read as 1 if PendSV exception is active
+      uint32_t SYSTICKACT     : 1;   // Read as 1 if SYSTICK exception is active
+      uint32_t USGFAULTPENDED : 1;   // Usage fault pended; usage fault started but was replaced by a higher-priority exception
+      uint32_t MEMFAULTPENDED : 1;   // Memory management fault pended; memory management fault started but was replaced by a higher-priority exception
+      uint32_t BUSFAULTPENDED : 1;   // Bus fault pended; bus fault handler was started but was replaced by a higher-priority exception
+      uint32_t SVCALLPENDED   : 1;   // SVC pended; SVC was started but was replaced by a higher-priority exception
+      uint32_t MEMFAULTENA    : 1;   // Memory management fault handler enable
+      uint32_t BUSFAULTENA    : 1;   // Bus fault handler enable
+      uint32_t USGFAULTENA    : 1;   // Usage fault handler enable
+#if (CMB_CPU_PLATFORM_TYPE == CMB_CPU_ARM_CORTEX_M33)
+      uint32_t SECUREFAULTENA : 1;   // Secure fault handler enable
+      uint32_t SECUREFAULTPENDED : 1;   // Secure fault pended; Secure fault handler was started but was replaced by a higher-priority exception
+      uint32_t HARDFAULTPENDED   : 1;   // Hard fault pended; Hard fault handler was started but was replaced by a higher-priority exception
+#else
+      // None
+#endif
+    } bits;
+  } syshndctrl;                          // System Handler Control and State Register (0xE000ED24)
+
+  union {
+    uint8_t value;
+    struct {
+      uint8_t IACCVIOL    : 1;     // Instruction access violation
+      uint8_t DACCVIOL    : 1;     // Data access violation
+      uint8_t UnusedBits  : 1;
+      uint8_t MUNSTKERR   : 1;     // Unstacking error
+      uint8_t MSTKERR     : 1;     // Stacking error
+      uint8_t MLSPERR     : 1;     // Floating-point lazy state preservation (M4/M7)
+      uint8_t UnusedBits2 : 1;
+      uint8_t MMARVALID   : 1;     // Indicates the MMAR is valid
+    } bits;
+  } mfsr;                                // Memory Management Fault Status Register (0xE000ED28)
+  uint32_t mmar;                     // Memory Management Fault Address Register (0xE000ED34)
+
+  union {
+    uint8_t value;
+    struct {
+      uint8_t IBUSERR    : 1;      // Instruction access violation
+      uint8_t PRECISERR  : 1;      // Precise data access violation
+      uint8_t IMPREISERR : 1;      // Imprecise data access violation
+      uint8_t UNSTKERR   : 1;      // Unstacking error
+      uint8_t STKERR     : 1;      // Stacking error
+      uint8_t LSPERR     : 1;      // Floating-point lazy state preservation (M4/M7)
+      uint8_t UnusedBits : 1;
+      uint8_t BFARVALID  : 1;      // Indicates BFAR is valid
+    } bits;
+  } bfsr;                                // Bus Fault Status Register (0xE000ED29)
+  uint32_t bfar;                     // Bus Fault Manage Address Register (0xE000ED38)
+
+  union {
+    uint16_t value;
+    struct {
+      uint16_t UNDEFINSTR : 1;     // Attempts to execute an undefined instruction
+      uint16_t INVSTATE   : 1;     // Attempts to switch to an invalid state (e.g., ARM)
+      uint16_t INVPC      : 1;     // Attempts to do an exception with a bad value in the EXC_RETURN number
+      uint16_t NOCP       : 1;     // Attempts to execute a coprocessor instruction
+#if (CMB_CPU_PLATFORM_TYPE == CMB_CPU_ARM_CORTEX_M33)
+      uint16_t STKOF      : 1;     // Indicates a stack overflow error has occured
+      uint16_t UnusedBits : 3;
+#else
+      uint16_t UnusedBits : 4;
+#endif
+      uint16_t UNALIGNED  : 1;     // Indicates that an unaligned access fault has taken place
+      uint16_t DIVBYZERO0 : 1;     // Indicates a divide by zero has taken place (can be set only if DIV_0_TRP is set)
+    } bits;
+  } ufsr;                                // Usage Fault Status Register (0xE000ED2A)
+
+  union {
+    uint32_t value;
+    struct {
+      uint32_t UnusedBits  : 1;
+      uint32_t VECTBL      : 1;      // Indicates hard fault is caused by failed vector fetch
+      uint32_t UnusedBits2 : 28;
+      uint32_t FORCED      : 1;      // Indicates hard fault is taken because of bus fault/memory management fault/usage fault
+      uint32_t DEBUGEVT    : 1;      // Indicates hard fault is triggered by debug event
+    } bits;
+  } hfsr;                                // Hard Fault Status Register (0xE000ED2C)
+
+  union {
+    uint32_t value;
+    struct {
+      uint32_t HALTED   : 1;         // Halt requested in NVIC
+      uint32_t BKPT     : 1;         // BKPT instruction executed
+      uint32_t DWTTRAP  : 1;         // DWT match occurred
+      uint32_t VCATCH   : 1;         // Vector fetch occurred
+      uint32_t EXTERNAL : 1;         // EDBGRQ signal asserted
+    } bits;
+  } dfsr;                                // Debug Fault Status Register (0xE000ED30)
+
+  uint32_t afsr;                     // Auxiliary Fault Status Register (0xE000ED3C), Vendor controlled (optional)
+};
+
+/* assert for developer. */
+#define CMB_ASSERT(EXPR)                                                       \
+if (!(EXPR))                                                                   \
+{                                                                              \
+    cmb_printf("(%s) has assert failed at %s.", #EXPR, __FUNCTION__);         \
+    while (1);                                                                 \
+}
+
+/* ELF(Executable and Linking Format) file extension name for each compiler */
+#if defined(__ARMCC_VERSION)
+    #define CMB_ELF_FILE_EXTENSION_NAME          ".axf"
+#elif defined(__ICCARM__)
+    #define CMB_ELF_FILE_EXTENSION_NAME          ".out"
+#elif defined(__GNUC__)
+    #define CMB_ELF_FILE_EXTENSION_NAME          ".elf"
+#else
+    #error "not supported compiler"
+#endif
+
+#ifndef cmb_printf
+    #error "cmb_printf isn't defined in 'cmb_cfg.h'"
+#endif
+
+#ifndef CMB_CPU_PLATFORM_TYPE
+    #error "CMB_CPU_PLATFORM_TYPE isn't defined in 'cmb_cfg.h'"
+#endif
+
+#if (defined(CMB_USING_BARE_METAL_PLATFORM) && defined(CMB_USING_OS_PLATFORM))
+    #error "CMB_USING_BARE_METAL_PLATFORM and CMB_USING_OS_PLATFORM only one of them can be used"
+#elif defined(CMB_USING_OS_PLATFORM)
+    #if !defined(CMB_OS_PLATFORM_TYPE)
+        #error "CMB_OS_PLATFORM_TYPE isn't defined in 'cmb_cfg.h'"
+    #endif /* !defined(CMB_OS_PLATFORM_TYPE) */
+    #if (CMB_OS_PLATFORM_TYPE == CMB_OS_PLATFORM_RTT)
+        #include <rtthread.h>
+    #elif (CMB_OS_PLATFORM_TYPE == CMB_OS_PLATFORM_UCOSII)
+        #include <ucos_ii.h>
+    #elif (CMB_OS_PLATFORM_TYPE == CMB_OS_PLATFORM_UCOSIII)
+        #include <os.h>
+    #elif (CMB_OS_PLATFORM_TYPE == CMB_OS_PLATFORM_FREERTOS)
+        #include <FreeRTOS.h>
+        extern uint32_t *vTaskStackAddr(void);/* need to modify the FreeRTOS/tasks source code */
+        extern uint32_t vTaskStackSize(void);
+        extern char * vTaskName(void);
+    #elif (CMB_OS_PLATFORM_TYPE == CMB_OS_PLATFORM_RTX5)
+        #include "rtx_os.h"
+    #else
+        #error "not supported OS type"
+    #endif /* (CMB_OS_PLATFORM_TYPE == CMB_OS_PLATFORM_RTT) */
+#endif /* (defined(CMB_USING_BARE_METAL_PLATFORM) && defined(CMB_USING_OS_PLATFORM)) */
+
+/* include or export for supported cmb_get_msp, cmb_get_psp and cmb_get_sp function */
+#if defined(__CC_ARM)
+    static __inline __asm uint32_t cmb_get_msp(void) {
+        mrs r0, msp
+        bx lr
+    }
+    static __inline __asm uint32_t cmb_get_psp(void) {
+        mrs r0, psp
+        bx lr
+    }
+    static __inline __asm uint32_t cmb_get_sp(void) {
+        mov r0, sp
+        bx lr
+    }
+#elif defined(__clang__)
+    __attribute__( (always_inline) ) static __inline uint32_t cmb_get_msp(void) {
+        uint32_t result;
+        __asm volatile ("mrs %0, msp" : "=r" (result) );
+        return (result);
+    }
+    __attribute__( (always_inline) ) static __inline uint32_t cmb_get_psp(void) {
+        uint32_t result;
+        __asm volatile ("mrs %0, psp" : "=r" (result) );
+        return (result);
+    }
+    __attribute__( (always_inline) ) static __inline uint32_t cmb_get_sp(void) {
+        uint32_t result;
+        __asm volatile ("mov %0, sp" : "=r" (result) );
+        return (result);
+    }
+#elif defined(__ICCARM__)
+/* IAR iccarm specific functions */
+/* Close Raw Asm Code Warning */
+#pragma diag_suppress=Pe940
+    static uint32_t cmb_get_msp(void)
+    {
+      __asm("mrs r0, msp");
+      __asm("bx lr");
+    }
+    static uint32_t cmb_get_psp(void)
+    {
+      __asm("mrs r0, psp");
+      __asm("bx lr");
+    }
+    static uint32_t cmb_get_sp(void)
+    {
+      __asm("mov r0, sp");
+      __asm("bx lr");
+    }
+#pragma diag_default=Pe940
+#elif defined(__GNUC__)
+    __attribute__( ( always_inline ) ) static inline uint32_t cmb_get_msp(void) {
+        register uint32_t result;
+        __asm volatile ("MRS %0, msp\n" : "=r" (result) );
+        return(result);
+    }
+    __attribute__( ( always_inline ) ) static inline uint32_t cmb_get_psp(void) {
+        register uint32_t result;
+        __asm volatile ("MRS %0, psp\n" : "=r" (result) );
+        return(result);
+    }
+    __attribute__( ( always_inline ) ) static inline uint32_t cmb_get_sp(void) {
+        register uint32_t result;
+        __asm volatile ("MOV %0, sp\n" : "=r" (result) );
+        return(result);
+    }
+#else
+    #error "not supported compiler"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
